@@ -1,0 +1,71 @@
+<div class="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-md w-full text-center">
+    <div class="mb-6">
+      <svg class="mx-auto h-20 w-20 text-red-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+        />
+      </svg>
+    </div>
+
+    <h2 class="text-3xl font-extrabold text-gray-900 mb-4">Erro de Segurança</h2>
+
+    <div class="bg-white shadow overflow-hidden sm:rounded-lg mb-6">
+      <div class="px-4 py-5 sm:p-6">
+        <div class="flex items-center justify-center mb-4">
+          <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800"> Código de erro: {{ errorCode }} </span>
+        </div>
+
+        <p class="text-gray-600 mb-4">
+          Detectamos um problema de segurança ao processar sua solicitação. Isso pode acontecer pelos seguintes motivos:
+        </p>
+
+        <ul class="list-disc text-left ml-6 text-gray-600 mb-4">
+          <li>Configuração incorreta de segurança</li>
+          <li>Token inválido ou expirado</li>
+          <li>Possível tentativa de ataque detectada</li>
+          <li>Problemas com certificados SSL</li>
+          <li>Falha na validação de CSRF</li>
+        </ul>
+
+        <p class="text-gray-600">
+          Por motivos de segurança, você foi redirecionado para esta página. Se você acredita que isso é um erro, entre em contato com o suporte
+          técnico.
+        </p>
+      </div>
+    </div>
+
+    <div class="flex flex-col sm:flex-row sm:space-x-4 justify-center">
+      <button
+        routerLink="/"
+        class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 mb-3 sm:mb-0"
+      >
+        <svg class="-ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+          <path
+            fill-rule="evenodd"
+            d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
+            clip-rule="evenodd"
+          />
+        </svg>
+        Ir para a Página Inicial
+      </button>
+
+      <button
+        routerLink="/auth/login"
+        class="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+      >
+        <svg class="-ml-1 mr-2 h-5 w-5 text-gray-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+          <path
+            fill-rule="evenodd"
+            d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-6-3a2 2 0 11-4 0 2 2 0 014 0zm-2 4a5 5 0 00-4.546 2.916A5.986 5.986 0 0010 16a5.986 5.986 0 004.546-2.084A5 5 0 0010 11z"
+            clip-rule="evenodd"
+          />
+        </svg>
+        Fazer Login
+      </button>
+    </div>
+  </div>
+</div>

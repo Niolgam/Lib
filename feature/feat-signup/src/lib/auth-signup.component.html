@@ -1,0 +1,237 @@
+<div class="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-md w-full space-y-8">
+    <!-- Header -->
+    <div class="text-center">
+      <h2 class="mt-6 text-3xl font-extrabold text-gray-900">Crie sua conta</h2>
+      <p class="mt-2 text-sm text-gray-600">
+        Ou
+        <a routerLink="/login" class="font-medium text-indigo-600 hover:text-indigo-500"> acesse sua conta existente </a>
+      </p>
+    </div>
+
+    <!-- Erro de registro -->
+    <div *ngIf="signupError()" class="rounded-md bg-red-50 p-4">
+      <div class="flex">
+        <div class="flex-shrink-0">
+          <svg class="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path
+              fill-rule="evenodd"
+              d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+              clip-rule="evenodd"
+            />
+          </svg>
+        </div>
+        <div class="ml-3">
+          <h3 class="text-sm font-medium text-red-800">Erro no cadastro</h3>
+          <div class="mt-2 text-sm text-red-700">
+            <p>{{ signupError() }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Formulário de registro -->
+    <form [formGroup]="signupForm" (ngSubmit)="onSubmit()" class="mt-8 space-y-6">
+      <!-- Nome -->
+      <div>
+        <label for="name" class="block text-sm font-medium text-gray-700">Nome completo</label>
+        <div class="mt-1 relative rounded-md shadow-sm">
+          <input
+            id="name"
+            name="name"
+            type="text"
+            formControlName="name"
+            [class.border-red-300]="hasNameError()"
+            [class.text-red-900]="hasNameError()"
+            class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            placeholder="Seu nome completo"
+          />
+          <div
+            *ngIf="hasNameError() && signupForm.controls.name.touched"
+            class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none"
+          >
+            <svg class="h-5 w-5 text-red-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path
+                fill-rule="evenodd"
+                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </div>
+        </div>
+        <p *ngIf="signupForm.controls.name.errors?.['required'] && signupForm.controls.name.touched" class="mt-2 text-sm text-red-600">
+          Nome é obrigatório
+        </p>
+        <p *ngIf="signupForm.controls.name.errors?.['minlength'] && signupForm.controls.name.touched" class="mt-2 text-sm text-red-600">
+          Nome deve ter pelo menos 3 caracteres
+        </p>
+      </div>
+
+      <!-- Email -->
+      <div>
+        <label for="email" class="block text-sm font-medium text-gray-700">Email</label>
+        <div class="mt-1 relative rounded-md shadow-sm">
+          <input
+            id="email"
+            name="email"
+            type="email"
+            formControlName="email"
+            [class.border-red-300]="hasEmailError()"
+            [class.text-red-900]="hasEmailError()"
+            class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            placeholder="seu@email.com"
+          />
+          <div
+            *ngIf="hasEmailError() && signupForm.controls.email.touched"
+            class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none"
+          >
+            <svg class="h-5 w-5 text-red-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path
+                fill-rule="evenodd"
+                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </div>
+        </div>
+        <p *ngIf="signupForm.controls.email.errors?.['required'] && signupForm.controls.email.touched" class="mt-2 text-sm text-red-600">
+          Email é obrigatório
+        </p>
+        <p *ngIf="signupForm.controls.email.errors?.['email'] && signupForm.controls.email.touched" class="mt-2 text-sm text-red-600">
+          Email inválido
+        </p>
+      </div>
+
+      <!-- Senha -->
+      <div>
+        <label for="password" class="block text-sm font-medium text-gray-700">Senha</label>
+        <div class="mt-1 relative rounded-md shadow-sm">
+          <input
+            id="password"
+            name="password"
+            type="password"
+            formControlName="password"
+            [class.border-red-300]="hasPasswordError()"
+            [class.text-red-900]="hasPasswordError()"
+            class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            placeholder="••••••"
+          />
+          <div
+            *ngIf="hasPasswordError() && signupForm.controls.password.touched"
+            class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none"
+          >
+            <svg class="h-5 w-5 text-red-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path
+                fill-rule="evenodd"
+                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </div>
+        </div>
+        <p *ngIf="signupForm.controls.password.errors?.['required'] && signupForm.controls.password.touched" class="mt-2 text-sm text-red-600">
+          Senha é obrigatória
+        </p>
+        <p *ngIf="signupForm.controls.password.errors?.['minlength'] && signupForm.controls.password.touched" class="mt-2 text-sm text-red-600">
+          Senha deve ter pelo menos 6 caracteres
+        </p>
+        <p *ngIf="signupForm.controls.password.errors?.['pattern'] && signupForm.controls.password.touched" class="mt-2 text-sm text-red-600">
+          Senha deve conter letras e números
+        </p>
+      </div>
+
+      <!-- Confirmar Senha -->
+      <div>
+        <label for="confirmPassword" class="block text-sm font-medium text-gray-700">Confirmar Senha</label>
+        <div class="mt-1 relative rounded-md shadow-sm">
+          <input
+            id="confirmPassword"
+            name="confirmPassword"
+            type="password"
+            formControlName="confirmPassword"
+            [class.border-red-300]="hasConfirmPasswordError()"
+            [class.text-red-900]="hasConfirmPasswordError()"
+            class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            placeholder="••••••"
+          />
+          <div
+            *ngIf="hasConfirmPasswordError() && signupForm.controls.confirmPassword.touched"
+            class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none"
+          >
+            <svg class="h-5 w-5 text-red-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path
+                fill-rule="evenodd"
+                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </div>
+        </div>
+        <p
+          *ngIf="signupForm.controls.confirmPassword.errors?.['required'] && signupForm.controls.confirmPassword.touched"
+          class="mt-2 text-sm text-red-600"
+        >
+          Confirmação de senha é obrigatória
+        </p>
+        <p *ngIf="signupForm.errors?.['passwordMismatch'] && signupForm.controls.confirmPassword.touched" class="mt-2 text-sm text-red-600">
+          As senhas não coincidem
+        </p>
+      </div>
+
+      <!-- Termos e Condições -->
+      <div class="flex items-start">
+        <div class="flex items-center h-5">
+          <input
+            id="terms"
+            name="terms"
+            type="checkbox"
+            formControlName="terms"
+            class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+          />
+        </div>
+        <div class="ml-3 text-sm">
+          <label for="terms" class="font-medium text-gray-700">Aceito os termos e condições</label>
+          <p *ngIf="signupForm.controls.terms.errors?.['required'] && signupForm.controls.terms.touched" class="text-red-600">
+            Você precisa aceitar os termos para continuar
+          </p>
+        </div>
+      </div>
+
+      <!-- Botão de registro -->
+      <div>
+        <button
+          type="submit"
+          [disabled]="disableSignupButton()"
+          class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <span *ngIf="isLoading()" class="absolute left-0 inset-y-0 flex items-center pl-3">
+            <svg class="animate-spin h-5 w-5 text-indigo-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
+            </svg>
+          </span>
+          <span *ngIf="!isLoading()" class="absolute left-0 inset-y-0 flex items-center pl-3">
+            <svg
+              class="h-5 w-5 text-indigo-500 group-hover:text-indigo-400"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </span>
+          {{ isLoading() ? 'Registrando...' : 'Registrar' }}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>

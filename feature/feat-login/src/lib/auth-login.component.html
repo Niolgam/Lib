@@ -1,0 +1,218 @@
+<div class="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-md w-full space-y-8">
+    <!-- Header -->
+    <div class="text-center">
+      <h2 class="mt-6 text-3xl font-extrabold text-gray-900">Acesse sua conta</h2>
+      <p class="mt-2 text-sm text-gray-600">
+        Ou
+        <a href="#" class="font-medium text-indigo-600 hover:text-indigo-500"> registre-se para uma nova conta </a>
+      </p>
+    </div>
+
+    <!-- Erro de login -->
+    <div *ngIf="loginError()" class="rounded-md bg-red-50 p-4">
+      <div class="flex">
+        <div class="flex-shrink-0">
+          <svg class="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path
+              fill-rule="evenodd"
+              d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+              clip-rule="evenodd"
+            />
+          </svg>
+        </div>
+        <div class="ml-3">
+          <h3 class="text-sm font-medium text-red-800">Erro de autenticação</h3>
+          <div class="mt-2 text-sm text-red-700">
+            <p>{{ loginError() }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Formulário de login -->
+    <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="mt-8 space-y-6">
+      <!-- Campo de email -->
+      <div>
+        <label for="username" class="block text-sm font-medium text-gray-700">Email</label>
+        <div class="mt-1 relative rounded-md shadow-sm">
+          <input
+            id="username"
+            name="username"
+            type="email"
+            formControlName="username"
+            [class.border-red-300]="hasUsernameError()"
+            [class.text-red-900]="hasUsernameError()"
+            [class.placeholder-red-300]="hasUsernameError()"
+            autocomplete="email"
+            required
+            class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            placeholder="seu@email.com"
+          />
+          <div
+            *ngIf="hasUsernameError() && loginForm.controls.username.touched"
+            class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none"
+          >
+            <svg class="h-5 w-5 text-red-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path
+                fill-rule="evenodd"
+                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </div>
+        </div>
+        <p *ngIf="loginForm.controls.username.errors?.['required'] && loginForm.controls.username.touched" class="mt-2 text-sm text-red-600">
+          Email é obrigatório
+        </p>
+        <p *ngIf="loginForm.controls.username.errors?.['email'] && loginForm.controls.username.touched" class="mt-2 text-sm text-red-600">
+          Email inválido
+        </p>
+      </div>
+
+      <!-- Campo de senha -->
+      <div>
+        <label for="password" class="block text-sm font-medium text-gray-700">Senha</label>
+        <div class="mt-1 relative rounded-md shadow-sm">
+          <input
+            id="password"
+            name="password"
+            type="password"
+            formControlName="password"
+            [class.border-red-300]="hasPasswordError()"
+            [class.text-red-900]="hasPasswordError()"
+            [class.placeholder-red-300]="hasPasswordError()"
+            autocomplete="current-password"
+            required
+            class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            placeholder="••••••"
+          />
+          <div
+            *ngIf="hasPasswordError() && loginForm.controls.password.touched"
+            class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none"
+          >
+            <svg class="h-5 w-5 text-red-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path
+                fill-rule="evenodd"
+                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </div>
+        </div>
+        <p *ngIf="loginForm.controls.password.errors?.['required'] && loginForm.controls.password.touched" class="mt-2 text-sm text-red-600">
+          Senha é obrigatória
+        </p>
+        <p *ngIf="loginForm.controls.password.errors?.['minlength'] && loginForm.controls.password.touched" class="mt-2 text-sm text-red-600">
+          Senha deve ter pelo menos 6 caracteres
+        </p>
+      </div>
+
+      <!-- Lembrar-me e recuperação de senha -->
+      <div class="flex items-center justify-between">
+        <div class="flex items-center">
+          <input
+            id="rememberMe"
+            name="rememberMe"
+            type="checkbox"
+            formControlName="rememberMe"
+            class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+          />
+          <label for="rememberMe" class="ml-2 block text-sm text-gray-900"> Lembrar-me </label>
+        </div>
+
+        <div class="text-sm">
+          <a href="#" class="font-medium text-indigo-600 hover:text-indigo-500"> Esqueceu sua senha? </a>
+        </div>
+      </div>
+
+      <!-- Botão de login -->
+      <div>
+        <button
+          type="submit"
+          [disabled]="disableLoginButton()"
+          class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <span *ngIf="isLoading()" class="absolute left-0 inset-y-0 flex items-center pl-3">
+            <svg class="animate-spin h-5 w-5 text-indigo-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
+            </svg>
+          </span>
+          <span *ngIf="!isLoading()" class="absolute left-0 inset-y-0 flex items-center pl-3">
+            <svg
+              class="h-5 w-5 text-indigo-500 group-hover:text-indigo-400"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </span>
+          {{ isLoading() ? 'Entrando...' : 'Entrar' }}
+        </button>
+      </div>
+    </form>
+
+    <!-- Separador -->
+    <div class="mt-6">
+      <div class="relative">
+        <div class="absolute inset-0 flex items-center">
+          <div class="w-full border-t border-gray-300"></div>
+        </div>
+        <div class="relative flex justify-center text-sm">
+          <span class="px-2 bg-gray-50 text-gray-500"> Ou continue com </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Botões de provedores externos -->
+    <div class="mt-6 grid grid-cols-3 gap-3">
+      <!-- Google -->
+      <div *ngIf="externalProviders().googleEnabled">
+        <button
+          (click)="loginWithGoogle()"
+          class="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
+        >
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+            <path
+              d="M12.24 10.285V14.4h6.806c-.275 1.765-2.056 5.174-6.806 5.174-4.095 0-7.439-3.389-7.439-7.574s3.345-7.574 7.439-7.574c2.33 0 3.891.989 4.785 1.849l3.254-3.138C18.189 1.186 15.479 0 12.24 0c-6.635 0-12 5.365-12 12s5.365 12 12 12c6.926 0 11.52-4.869 11.52-11.726 0-.788-.085-1.39-.189-1.989H12.24z"
+            />
+          </svg>
+        </button>
+      </div>
+
+      <!-- GovBr -->
+      <div *ngIf="externalProviders().govBrEnabled">
+        <button
+          (click)="loginWithGovBr()"
+          class="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
+        >
+          <span class="sr-only">Gov.br</span>
+          <svg class="h-5 w-5 text-yellow-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2L2 7v10l10 5 10-5V7L12 2z" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Provedor personalizado -->
+      <div *ngIf="externalProviders().customEnabled">
+        <button
+          (click)="loginWithCustomProvider()"
+          class="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50"
+        >
+          <span>{{ externalProviders().customName }}</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
