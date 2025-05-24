@@ -1,696 +1,525 @@
-import { inject, computed, PLATFORM_ID, Signal } from '@angular/core';
+import { inject, PLATFORM_ID } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
-import { patchState, signalStore, withComputed, withState, withProps, withMethods } from '@ngrx/signals';
+import { Router } from '@angular/router';
+import { computed } from '@angular/core';
+import { patchState, signalStore, withComputed, withMethods, withState, withProps } from '@ngrx/signals';
+import { rxMethod } from '@ngrx/signals/rxjs-interop';
+import { pipe, switchMap, tap, catchError, finalize, of } from 'rxjs';
 
-import { RoleStore } from './role.store';
+import { withCallState, withImmutableState } from '@vai/store-feature';
+import { LocalStorageService, LoggingService } from '@vai/services';
 import {
   AuthService,
-  TokenService,
   AuthConfigService,
-  AuthErrorService,
+  TokenService,
+  CsrfService,
+  SecurityMonitorService,
+  PermissionService,
+  createRoleCheckHelpers,
   createAuthRateLimitingHelpers,
-  createAuthRedirectHelpers,
   createAuthTokenHelpers,
+  createAuthRedirectHelpers,
+  AuthErrorService,
 } from '@auth/utils';
-import { LoggingService, LocalStorageService, CryptoService } from '@vai/services';
-import { User, LoginCredentials, ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest } from './models';
-import { Router } from '@angular/router';
-import { CsrfService } from '@auth/utils';
-import { SecurityMonitorService } from '@auth/utils';
-import { withCallState, withImmutableState } from '@vai/store-feature';
-import { toObservable } from '@angular/core/rxjs-interop';
-import { rxMethod } from '@ngrx/signals/rxjs-interop';
-import { pipe, switchMap, throwError, Observable, EMPTY, of } from 'rxjs';
+import {
+  User,
+  LoginCredentials,
+  AuthToken,
+  ForgotPasswordRequest,
+  ResetPasswordRequest,
+  ChangePasswordRequest,
+  SignupRequestPayload,
+} from './models';
 
+// Estado da store
 interface AuthStoreState {
-  isAuthenticated: boolean;
-  user: User | null;
-  returnUrl: string;
-  isVerifyingStatus: boolean;
-  serverAuthStatus: boolean | null;
+  currentUser: User | null;
+  isInitialized: boolean;
   loginAttempts: Map<string, { count: number; lastAttempt: number }>;
-  refreshFailCount: number;
-  lastRefreshAttempt: number;
-  ipThrottleState: {
-    count: number;
-    resetTime: number;
-  };
-  refreshTokenTimerId: any;
+  returnUrl: string;
+  refreshTokenTimerId: number | null;
+  lastLoginTime: number | null;
+  lastRefreshTime: number | null;
+  rememberUser: boolean;
 }
 
 const initialState: AuthStoreState = {
-  isAuthenticated: false,
-  user: null,
-  returnUrl: '/dashboard',
-  isVerifyingStatus: false,
-  serverAuthStatus: null,
-  loginAttempts: new Map<string, { count: number; lastAttempt: number }>(),
-  refreshFailCount: 0,
-  lastRefreshAttempt: 0,
-  ipThrottleState: { count: 0, resetTime: 0 },
+  currentUser: null,
+  isInitialized: false,
+  loginAttempts: new Map(),
+  returnUrl: '',
   refreshTokenTimerId: null,
+  lastLoginTime: null,
+  lastRefreshTime: null,
+  rememberUser: false,
 };
 
-/**
- * AuthStore - Centraliza toda lógica relacionada a autenticação
- * Implementa BaseStore para garantir interface consistente
- */
 export const AuthStore = signalStore(
   withState(initialState),
-  withProps(() => ({
-    authService: inject(AuthService),
-    tokenService: inject(TokenService),
-    loggingService: inject(LoggingService),
-    authConfigService: inject(AuthConfigService),
-    roleStore: inject(RoleStore),
-    router: inject(Router),
-    localStorageService: inject(LocalStorageService),
-    csrfService: inject(CsrfService),
-    cryptoService: inject(CryptoService),
-    securityMonitor: inject(SecurityMonitorService),
-    isBrowser: isPlatformBrowser(inject(PLATFORM_ID)),
-  })),
   withCallState(),
   withImmutableState(),
-  withComputed(({ user, serverAuthStatus, isAuthenticated }) => {
-    const tokenService = inject(TokenService);
+  withProps(() => ({
+    authService: inject(AuthService),
+    authConfigService: inject(AuthConfigService),
+    tokenService: inject(TokenService),
+    csrfService: inject(CsrfService),
+    localStorageService: inject(LocalStorageService),
+    loggingService: inject(LoggingService),
+    securityMonitorService: inject(SecurityMonitorService),
+    permissionService: inject(PermissionService),
+    router: inject(Router),
+    isBrowser: isPlatformBrowser(inject(PLATFORM_ID)),
+  })),
+  withComputed((store) => ({
+    isAuthenticated: computed(() => {
+      const token = store.tokenService.token();
+      const isValid = store.tokenService.isAuthenticated();
+      return !!token && isValid;
+    }),
+    config: computed(() => store.authConfigService.config()),
+    isFullyInitialized: computed(() => store.isInitialized() && store.tokenService.token() !== null),
+    currentToken: computed(() => store.tokenService.token()),
+    decodedToken: computed(() => store.tokenService.decodedToken()),
+    currentUserId: computed(() => store.tokenService.userId()),
+    currentUserRoles: computed(() => store.tokenService.userRoles()),
+    isTokenExpiringSoon: computed(() => store.tokenService.isTokenExpiringSoon()),
+    isLoginBlocked: computed(() => {
+      const attempts = store.loginAttempts();
+      const maxAttempts = store.authConfigService.maxLoginAttempts();
+      const blockDuration = store.authConfigService.loginBlockDuration();
 
-    return {
-      // Estado principal para interface BaseStore
-      state: computed(() => ({
-        isAuthenticated: isAuthenticated(),
-        user: user(),
-        serverAuthStatus: serverAuthStatus(),
-      })),
-      // Outros computeds
-      currentUser: computed(() => user()),
-      isUserAuthenticated: computed(() => {
-        const tokenAuth = tokenService.isAuthenticated();
-        const serverAuth = serverAuthStatus();
-        return serverAuth !== null ? serverAuth : tokenAuth;
-      }),
-      userName: computed(() => user()?.name ?? tokenService.decodedToken()?.['preferred_username'] ?? ''),
-      userId: computed(() => user()?.id ?? tokenService.userId() ?? null),
-      userRolesStructured: computed(() => user()?.roles ?? []),
-    };
-  }),
+      return Array.from(attempts.values()).some((attempt) => {
+        const now = Date.now();
+        const timeSinceLastAttempt = now - attempt.lastAttempt;
+        return attempt.count >= maxAttempts && timeSinceLastAttempt < blockDuration;
+      });
+    }),
+    roleHelpers: computed(() => {
+      const user = store.currentUser();
+      return createRoleCheckHelpers({ user: () => user });
+    }),
+    userName: computed(() => store.currentUser()?.name || ''),
+    userEmail: computed(() => store.currentUser()?.email || ''),
+    sessionAge: computed(() => {
+      const loginTime = store.lastLoginTime();
+      return loginTime ? Date.now() - loginTime : 0;
+    }),
+    timeSinceLastRefresh: computed(() => {
+      const refreshTime = store.lastRefreshTime();
+      return refreshTime ? Date.now() - refreshTime : 0;
+    }),
+  })),
 
-  // Métodos públicos
+  // Métodos
   withMethods((store) => {
-    // Inicializando helpers
-    const rateLimit = createAuthRateLimitingHelpers(store);
+    // Helpers auxiliares
+    const rateLimitHelpers = createAuthRateLimitingHelpers(store);
     const tokenHelpers = createAuthTokenHelpers(store);
     const redirectHelpers = createAuthRedirectHelpers(store, store.isBrowser);
 
     const methods = {
-      initialize() {
-        store.loggingService.debug('AuthStore: Initializing');
-
-        methods.verifyAuthStatusOnInit().subscribe({
-          next: (isAuthenticated: boolean) => {
-            store.loggingService.debug('AuthStore: Initial auth status', { isAuthenticated });
-
-            if (isAuthenticated) {
-              methods.setupTokenRefreshScheduler();
-              methods.loadUser({ forceLoad: true });
-            }
-          },
-        });
-      },
-
-      reset() {
-        tokenHelpers.clearAuthState(store.tokenService, store.csrfService);
-        patchState(store, initialState);
-        store.loggingService.debug('AuthStore: Reset to initial state');
-      },
-
-      // Verificar status de autenticação na inicialização
-      verifyAuthStatusOnInit() {
-        patchState(store, { isVerifyingStatus: true });
-
-        const operationKey = 'verifyAuthOnInit';
-
-        return store.trackCall(operationKey, store.authService.verifyAuthStatusRequest(), {
-          onSuccess: (isAuthenticated: boolean) => {
-            patchState(store, {
-              serverAuthStatus: isAuthenticated,
-              isAuthenticated,
-              isVerifyingStatus: false,
-            });
-
-            store.loggingService.debug('Initial auth status verified', { isAuthenticated });
-          },
-          onError: (error: any) => {
-            store.loggingService.warn('Initial auth status verification failed', { error });
-
-            patchState(store, {
-              serverAuthStatus: false,
-              isAuthenticated: false,
-              isVerifyingStatus: false,
-            });
-          },
-        });
-      },
-
-      // Configurar agendador de refresh de token
-      setupTokenRefreshScheduler(): void {
-        if (!store.isBrowser) return;
-
-        tokenHelpers.clearTokenRefreshScheduler();
-
-        // Agendamento inicial se estiver autenticado
-        if (store.isUserAuthenticated()) {
-          tokenHelpers.scheduleTokenRefresh(store.tokenService, store.authConfigService, store.loggingService, () => methods.refreshToken);
-        }
-      },
-
-      // Limpar agendador
-      clearTokenRefreshScheduler: tokenHelpers.clearTokenRefreshScheduler,
-
-      // Salvar URL de retorno
-      setReturnUrl(url: string): void {
-        redirectHelpers.saveReturnUrl(url, store.localStorageService);
-      },
-
-      // Login usando rxMethod para padronizar o uso de Signals e RxJS
-      login: rxMethod<LoginCredentials>(
+      // === INICIALIZAÇÃO ===
+      initialize: rxMethod<void>(
         pipe(
-          switchMap((credentials) => {
-            store.loggingService.info('Login attempt', { u: credentials.username });
+          tap(() => {
+            store.loggingService.debug('AuthStore: Initializing authentication state');
+          }),
+          switchMap(() => {
+            // Verificar se há token armazenado
+            const token = store.tokenService.token();
 
-            // Verificação de rate limiting
-            if (rateLimit.isLoginRateLimited(credentials.username, store.authConfigService)) {
-              store.loggingService.warn('Login rate limited', { u: credentials.username });
-              store.securityMonitor?.logSecurityEvent('auth.rate_limited', 'warning', { username: credentials.username });
-
-              return throwError(() => ({
-                message: 'Too many login attempts. Please try again later',
-                code: 'rate_limited',
-                status: 429,
-                timestamp: new Date().toISOString(),
-                recoverable: true,
-              }));
+            if (token && store.tokenService.isAuthenticated()) {
+              // Token válido existe, carregar dados do usuário
+              return methods.loadUser$();
+            } else {
+              // Sem token válido, verificar status no servidor
+              return methods.verifyAuthStatus$();
             }
+          }),
+          tap(() => {
+            patchState(store, { isInitialized: true });
+            store.loggingService.debug('AuthStore: Initialization completed');
 
-            // Registrar tentativa
-            rateLimit.registerLoginAttempt(credentials.username, store.authConfigService);
+            // Configurar refresh automático se autenticado
+            if (store.isAuthenticated()) {
+              tokenHelpers.scheduleTokenRefresh(store.tokenService, store.authConfigService, store.loggingService, () => methods.refreshToken$());
+            }
+          }),
+          catchError((error) => {
+            store.loggingService.error('AuthStore: Initialization failed', { error });
+            patchState(store, { isInitialized: true });
+            return of(null);
+          }),
+        ),
+      ),
 
-            // Enviar request de login
-            return store.trackCall('login', store.authService.loginRequest(credentials), {
-              onSuccess: (authToken: any) => {
-                if (authToken && authToken.accessToken) {
-                  // Reset contador de tentativas para este usuário
-                  rateLimit.resetLoginAttempts(credentials.username);
+      // === AUTENTICAÇÃO ===
 
-                  store.tokenService.storeToken(authToken, credentials.rememberMe);
-                  patchState(store, {
-                    serverAuthStatus: true,
-                    isAuthenticated: true,
-                  });
+      login$: rxMethod<LoginCredentials>(
+        pipe(
+          tap((credentials) => {
+            store.loggingService.debug('AuthStore: Login attempt', { username: credentials.username });
 
-                  store.loggingService.info('Login successful', { u: credentials.username });
+            // Registrar tentativa de login
+            rateLimitHelpers.registerLoginAttempt(credentials.username, store.authConfigService);
 
-                  // Registra evento de login bem-sucedido
-                  store.securityMonitor?.logLoginAttempt(credentials.username, true);
+            // Verificar rate limiting
+            if (rateLimitHelpers.isLoginRateLimited(credentials.username, store.authConfigService)) {
+              throw new Error('Login temporariamente bloqueado devido a muitas tentativas');
+            }
+          }),
+          switchMap((credentials) => {
+            const operationKey = `login_${credentials.username}`;
 
-                  // Carrega os dados do usuário imediatamente
-                  methods.loadUser({ forceLoad: true });
+            return store.trackCall(operationKey, store.authService.loginRequest(credentials), {
+              onSuccess: (token: AuthToken) => {
+                // Armazenar token
+                store.tokenService.storeToken(token, credentials.rememberMe);
 
-                  // Redireciona após login
-                  methods.redirectAfterLogin();
+                // Resetar tentativas de login
+                rateLimitHelpers.resetLoginAttempts(credentials.username);
 
-                  return authToken;
-                } else {
-                  // Incrementa contador de falhas
-                  rateLimit.incrementLoginAttempts(credentials.username);
-
-                  store.loggingService.warn('Token not in login response', { body: authToken });
-                  tokenHelpers.clearAuthState(store.tokenService, store.csrfService);
-
-                  // Registra evento de falha de login
-                  store.securityMonitor?.logLoginAttempt(credentials.username, false);
-
-                  throw new Error('Token not received post-login. Authentication response is missing required data.');
-                }
-              },
-              onError: (error: any) => {
-                // Incrementa contador de falhas mesmo em caso de erro
-                rateLimit.incrementLoginAttempts(credentials.username);
-
-                // Analisa e processa o erro de forma estruturada
-                const errorInfo = AuthErrorService.parseAuthError(error);
-
-                // Log dinâmico com nível apropriado
-                store.loggingService[errorInfo.level](`Login failed: ${errorInfo.message}`, {
-                  u: credentials.username,
-                  status: error.status,
-                  reason: errorInfo.reason,
-                  details: errorInfo.details,
+                // Atualizar estado
+                patchState(store, {
+                  lastLoginTime: Date.now(),
+                  rememberUser: credentials.rememberMe || false,
                 });
 
-                tokenHelpers.clearAuthState(store.tokenService, store.csrfService);
+                // Registrar evento de segurança
+                store.securityMonitorService.logLoginAttempt(credentials.username, true);
 
-                store.securityMonitor?.logLoginAttempt(credentials.username, false);
+                // Carregar dados do usuário
+                methods.loadUser$();
 
-                return throwError(() => errorInfo);
-              },
-            });
-          }),
-        ),
-      ),
+                // Configurar refresh de token
+                tokenHelpers.scheduleTokenRefresh(store.tokenService, store.authConfigService, store.loggingService, () => methods.refreshToken$());
 
-      // Versão Observable do login para compatibilidade com interceptors
-      login$(credentials: LoginCredentials): Observable<any> {
-        return toObservable(this.login(credentials));
-      },
-
-      // Logout
-      logout: rxMethod(
-        pipe(
-          switchMap(() => {
-            store.loggingService.info('Logout attempt');
-
-            return store.trackCall('logout', store.authService.logoutRequest(), {
-              onSuccess: () => {
-                store.loggingService.info('Server logout successful');
-                tokenHelpers.clearAuthState(store.tokenService, store.csrfService);
-                methods.redirectAfterLogout();
-                return true;
+                store.loggingService.info('AuthStore: Login successful', { username: credentials.username });
               },
               onError: (error: any) => {
-                store.loggingService.error('Server logout error', { m: error.message });
-                tokenHelpers.clearAuthState(store.tokenService, store.csrfService);
-                methods.redirectAfterLogout();
-                return false;
+                // Incrementar tentativas de login
+                rateLimitHelpers.incrementLoginAttempts(credentials.username);
+
+                // Registrar evento de segurança
+                store.securityMonitorService.logLoginAttempt(credentials.username, false);
+
+                // Processar erro
+                const authError = AuthErrorService.parseAuthError(error);
+                store.loggingService.warn('AuthStore: Login failed', {
+                  username: credentials.username,
+                  reason: authError.reason,
+                  message: authError.message,
+                });
+
+                throw error;
               },
             });
           }),
         ),
       ),
 
-      // Versão Observable do logout para compatibilidade com interceptors
-      logout$(): Observable<any> {
-        return toObservable(this.logout());
-      },
-
-      // Renovar token usando rxMethod
-      refreshToken: rxMethod(
+      logout$: rxMethod<void>(
         pipe(
+          tap(() => {
+            store.loggingService.debug('AuthStore: Logout initiated');
+          }),
           switchMap(() => {
-            store.loggingService.debug('Refresh token attempt');
+            const operationKey = 'logout';
+
+            return store.trackCall(operationKey, store.authService.logoutRequest(), {
+              onSuccess: () => {
+                store.loggingService.info('AuthStore: Logout successful');
+              },
+              onError: (error: any) => {
+                store.loggingService.warn('AuthStore: Logout request failed, clearing local state anyway', { error });
+              },
+            });
+          }),
+          finalize(() => {
+            // Sempre limpar estado local, independente do resultado do servidor
+            methods.clearAuthState();
+            redirectHelpers.redirectAfterLogout(store.router, store.authConfigService);
+          }),
+        ),
+      ),
+
+      refreshToken$: rxMethod<void>(
+        pipe(
+          tap(() => {
+            store.loggingService.debug('AuthStore: Refreshing token');
+          }),
+          switchMap(() => {
             const operationKey = 'refreshToken';
 
             return store.trackCall(operationKey, store.authService.refreshTokenRequest(), {
-              onSuccess: (responseToken: any) => {
-                if (responseToken && responseToken.accessToken) {
-                  // Reset contador de falhas em sucesso
-                  patchState(store, { refreshFailCount: 0 });
+              onSuccess: (newToken: AuthToken) => {
+                // Armazenar novo token
+                store.tokenService.storeToken(newToken, store.rememberUser());
 
-                  store.tokenService.storeToken(responseToken);
-                  patchState(store, {
-                    serverAuthStatus: true,
-                    isAuthenticated: true,
-                  });
+                // Atualizar estado
+                patchState(store, { lastRefreshTime: Date.now() });
 
-                  store.loggingService.debug('Token refresh successful');
+                // Reagendar próximo refresh
+                tokenHelpers.scheduleTokenRefresh(store.tokenService, store.authConfigService, store.loggingService, () => methods.refreshToken$());
 
-                  // Reagendar próximo refresh
-                  tokenHelpers.scheduleTokenRefresh(store.tokenService, store.authConfigService, store.loggingService, () => methods.refreshToken);
-
-                  return true;
-                } else {
-                  // Incrementa contador de falhas
-                  patchState(store, {
-                    refreshFailCount: store.refreshFailCount() + 1,
-                  });
-
-                  store.loggingService.warn('New token not in refresh response.');
-                  tokenHelpers.clearAuthState(store.tokenService, store.csrfService);
-
-                  throw new Error('Token not received post-refresh.');
-                }
+                store.loggingService.debug('AuthStore: Token refreshed successfully');
               },
               onError: (error: any) => {
-                // Incrementa contador de falhas
-                patchState(store, {
-                  refreshFailCount: store.refreshFailCount() + 1,
-                });
+                store.loggingService.error('AuthStore: Token refresh failed', { error });
 
-                store.loggingService.error('Token refresh failed', { m: error.message });
-                tokenHelpers.clearAuthState(store.tokenService, store.csrfService);
-                return false;
+                // Se falha no refresh, fazer logout
+                methods.clearAuthState();
+                redirectHelpers.redirectAfterLogout(store.router, store.authConfigService);
+
+                throw error;
               },
             });
           }),
         ),
       ),
 
-      // Versão Observable do refreshToken para compatibilidade com interceptors
-      refreshToken$(): Observable<any> {
-        return toObservable(this.refreshToken());
-      },
+      // === GERENCIAMENTO DE USUÁRIO ===
 
-      // Verificar status de autenticação usando rxMethod
-      verifyAuthStatus: rxMethod(
+      loadUser$: rxMethod<void>(
         pipe(
           switchMap(() => {
-            patchState(store, { isVerifyingStatus: true });
-            store.loggingService.debug('Verifying auth status');
+            const operationKey = 'loadUser';
 
-            return store.trackCall('verifyAuthStatus', store.authService.verifyAuthStatusRequest(), {
-              onSuccess: (authenticated: boolean) => {
-                patchState(store, {
-                  serverAuthStatus: authenticated,
-                  isAuthenticated: authenticated,
-                  isVerifyingStatus: false,
-                });
-
-                if (!authenticated && store.tokenService.token()) {
-                  store.tokenService.clearToken();
-                  store.csrfService.clearToken();
-                }
-
-                store.loggingService.debug('Auth status verified', { authenticated });
-                return authenticated;
+            return store.trackCall(operationKey, store.authService.fetchUserDataRequest(), {
+              onSuccess: (user: User) => {
+                patchState(store, { currentUser: user });
+                store.loggingService.debug('AuthStore: User data loaded', { userId: user.id });
               },
               onError: (error: any) => {
-                store.loggingService.warn('Auth status verification failed', { error });
-
-                patchState(store, {
-                  serverAuthStatus: false,
-                  isAuthenticated: false,
-                  isVerifyingStatus: false,
-                });
-
-                if (store.tokenService.token()) {
-                  store.tokenService.clearToken();
-                  store.csrfService.clearToken();
-                }
-
-                return false;
+                store.loggingService.error('AuthStore: Failed to load user data', { error });
+                throw error;
               },
             });
           }),
         ),
       ),
 
-      // Versão Observable de verifyAuthStatus para compatibilidade
-      verifyAuthStatus$(): Observable<boolean> {
-        return toObservable(this.verifyAuthStatus());
-      },
-
-      // Carregar dados do usuário usando rxMethod
-      loadUser: rxMethod<{ forceLoad?: boolean } | void>(
+      verifyAuthStatus$: rxMethod<void>(
         pipe(
-          switchMap((options) => {
-            const force = options && 'forceLoad' in options ? options.forceLoad : false;
+          switchMap(() => {
+            const operationKey = 'verifyAuthStatus';
 
-            if (!store.isUserAuthenticated() && !force) {
-              store.loggingService.warn('AuthStore: loadUser skipped, store not authenticated and not forced.');
-              return EMPTY;
-            }
-
-            if (store.user() && !force) {
-              store.loggingService.debug('AuthStore: User already in store and not forcing reload.');
-              return of(store.user());
-            }
-
-            return store.trackCall('loadUser', store.authService.fetchUserDataRequest(), {
-              onSuccess: (userData: User) => {
-                patchState(store, { user: userData });
-                store.loggingService.debug('User data loaded', { userId: userData?.id });
-                return userData;
-              },
-              onError: (error: any) => {
-                store.loggingService.error('Failed to load user data', { error });
-                patchState(store, { user: null, isAuthenticated: false });
-                return null;
-              },
-            });
-          }),
-        ),
-      ),
-
-      // Versão Observable de loadUser para compatibilidade
-      loadUser$(options?: { forceLoad?: boolean }): Observable<User | null> {
-        return toObservable(this.loadUser(options));
-      },
-
-      // Iniciar autenticação com Google
-      initiateGoogleAuth(): string {
-        const cfg = store.authConfigService.config();
-        const url = store.authConfigService.resolvedGoogleAuthUrl();
-
-        if (!(cfg?.googleAuthEnabled && url)) {
-          throw new Error('Google auth not enabled/URL not configured');
-        }
-
-        // Adiciona nonce para proteção contra CSRF
-        const nonce = store.cryptoService.generateSecureId();
-        if (store.isBrowser) {
-          store.localStorageService.setItem('auth_nonce', nonce);
-        }
-
-        store.loggingService.info('Google auth initiated');
-        return `${url}${url.includes('?') ? '&' : '?'}nonce=${nonce}`;
-      },
-
-      // Iniciar autenticação com GovBR
-      initiateGovBrAuth(): string {
-        const cfg = store.authConfigService.config();
-        const url = store.authConfigService.resolvedGovBrAuthUrl();
-
-        if (!(cfg?.govBrAuthEnabled && url)) {
-          throw new Error('GovBR auth not enabled/URL not configured');
-        }
-
-        // Adiciona nonce para proteção contra CSRF
-        const nonce = store.cryptoService.generateSecureId();
-        if (store.isBrowser) {
-          store.localStorageService.setItem('auth_nonce', nonce);
-        }
-
-        store.loggingService.info('GovBR auth initiated');
-        return `${url}${url.includes('?') ? '&' : '?'}nonce=${nonce}`;
-      },
-
-      // Processar callback de autenticação externa
-      handleAuthCallback: rxMethod<{ code: string; provider: 'google' | 'govbr'; nonce?: string }>(
-        pipe(
-          switchMap((params) => {
-            const { code, provider, nonce } = params;
-            store.loggingService.debug(`Processing ${provider} auth callback`);
-
-            // Verificar nonce para proteger contra CSRF
-            let storedNonce = '';
-            if (store.isBrowser) {
-              storedNonce = store.localStorageService.getItem('auth_nonce') || '';
-              store.localStorageService.removeItem('auth_nonce'); // Remove independente do resultado
-            }
-
-            // CORRIGIDO: Verificar CSRF adequadamente
-            // Se o nonce foi fornecido na requisição original, ele DEVE corresponder ao armazenado
-            // Se não houve nonce na requisição original (storedNonce vazio), o nonce do callback deve ser vazio também
-            if ((storedNonce && (!nonce || nonce !== storedNonce)) || (nonce && !storedNonce)) {
-              const errorMessage = 'Security validation failed for OAuth callback';
-              store.loggingService.error(errorMessage, { provider });
-
-              // Registra evento de segurança
-              store.securityMonitor?.logSecurityEvent('auth.oauth_nonce_mismatch', 'critical', {
-                provider,
-                hasNonce: !!nonce,
-                hasStoredNonce: !!storedNonce,
-              });
-
-              return store.trackCall(`handleAuthCallback_${provider}`, store.authService.simulateDelayedError(new Error(errorMessage)));
-            }
-
-            return store.trackCall(`handleAuthCallback_${provider}`, store.authService.handleAuthCallbackRequest(code, provider, nonce), {
-              onSuccess: (responseToken: any) => {
-                if (responseToken && responseToken.accessToken) {
-                  store.tokenService.storeToken(responseToken);
-                  patchState(store, {
-                    serverAuthStatus: true,
-                    isAuthenticated: true,
-                  });
-
-                  store.loggingService.info(`${provider} auth successful`);
-
-                  methods.loadUser({ forceLoad: true });
-                  methods.redirectAfterLogin();
-                  return responseToken;
+            return store.trackCall(operationKey, store.authService.verifyAuthStatusRequest(), {
+              onSuccess: (isAuthenticated: boolean) => {
+                if (isAuthenticated) {
+                  // Se autenticado no servidor, carregar dados do usuário
+                  methods.loadUser$();
                 } else {
-                  store.loggingService.warn(`Token not in ${provider} callback response.`);
-                  tokenHelpers.clearAuthState(store.tokenService, store.csrfService);
-
-                  throw new Error(`Token not received post ${provider} callback.`);
+                  // Não autenticado, limpar estado local
+                  methods.clearAuthState();
                 }
+
+                store.loggingService.debug('AuthStore: Auth status verified', { isAuthenticated });
               },
               onError: (error: any) => {
-                store.loggingService.error(`${provider} auth callback failed`, { m: error.message });
-                tokenHelpers.clearAuthState(store.tokenService, store.csrfService);
-                return error;
+                store.loggingService.warn('AuthStore: Failed to verify auth status', { error });
+                // Em caso de erro, assumir não autenticado
+                methods.clearAuthState();
               },
             });
           }),
         ),
       ),
 
-      // Versão Observable de handleAuthCallback para compatibilidade
-      handleAuthCallback$(params: { code: string; provider: 'google' | 'govbr'; nonce?: string }): Observable<any> {
-        return toObservable(this.handleAuthCallback(params));
-      },
+      // === GERENCIAMENTO DE SENHA ===
 
-      // Solicitar recuperação de senha
-      forgotPassword: rxMethod<ForgotPasswordRequest>(
+      forgotPassword$: rxMethod<ForgotPasswordRequest>(
         pipe(
           switchMap((request) => {
-            store.loggingService.info('Password reset requested', { e: request.email });
+            const operationKey = 'forgotPassword';
 
-            // Limita frequência de solicitações
-            const key = `forgot_${request.email}`;
-            let lastRequest = '';
-
-            if (store.isBrowser) {
-              lastRequest = store.localStorageService.getItem(key) || '';
-            }
-
-            if (lastRequest) {
-              const lastTime = parseInt(lastRequest, 10);
-              const now = Date.now();
-
-              // Limita a 1 solicitação a cada 10 minutos
-              if (now - lastTime < 600000) {
-                // 10 minutos
-                // Registra evento de segurança
-                store.securityMonitor?.logSecurityEvent('auth.password_reset_throttled', 'warning', { email: request.email });
-
-                return store.trackCall(
-                  'forgotPassword',
-                  store.authService.simulateDelayedError(new Error('Please wait before requesting another password reset')),
-                );
-              }
-            }
-
-            // Salva timestamp da solicitação
-            if (store.isBrowser) {
-              store.localStorageService.setItem(key, Date.now().toString());
-            }
-
-            return store.trackCall('forgotPassword', store.authService.forgotPasswordRequest(request), {
+            return store.trackCall(operationKey, store.authService.forgotPasswordRequest(request), {
               onSuccess: () => {
-                store.loggingService.info('Password reset email sent', { e: request.email });
-                return true;
-              },
-              onError: (error: any) => {
-                store.loggingService.error('Password reset request failed', { e: request.email, m: error.message });
-                return false;
+                store.loggingService.info('AuthStore: Forgot password request sent', { email: request.email });
               },
             });
           }),
         ),
       ),
 
-      // Versão Observable de forgotPassword para compatibilidade
-      forgotPassword$(request: ForgotPasswordRequest): Observable<any> {
-        return toObservable(this.forgotPassword(request));
-      },
-
-      // Redefinir senha com token de recuperação
-      resetPassword: rxMethod<ResetPasswordRequest>(
+      resetPassword$: rxMethod<ResetPasswordRequest>(
         pipe(
           switchMap((request) => {
-            store.loggingService.debug('Processing password reset with token');
+            const operationKey = 'resetPassword';
 
-            return store.trackCall('resetPassword', store.authService.resetPasswordRequest(request), {
+            return store.trackCall(operationKey, store.authService.resetPasswordRequest(request), {
               onSuccess: () => {
-                store.loggingService.info('Password reset successful');
-                return true;
-              },
-              onError: (error: any) => {
-                store.loggingService.error('Password reset failed', { m: error.message });
-                return false;
+                store.loggingService.info('AuthStore: Password reset successful');
               },
             });
           }),
         ),
       ),
 
-      // Versão Observable de resetPassword para compatibilidade
-      resetPassword$(request: ResetPasswordRequest): Observable<any> {
-        return toObservable(this.resetPassword(request));
-      },
-
-      // Alterar senha do usuário logado
-      changePassword: rxMethod<ChangePasswordRequest>(
+      changePassword$: rxMethod<ChangePasswordRequest>(
         pipe(
           switchMap((request) => {
-            store.loggingService.debug('Processing password change for authenticated user');
+            const operationKey = 'changePassword';
 
-            return store.trackCall('changePassword', store.authService.changePasswordRequest(request), {
+            return store.trackCall(operationKey, store.authService.changePasswordRequest(request), {
               onSuccess: () => {
-                store.loggingService.info('Password change successful');
-                return true;
-              },
-              onError: (error: any) => {
-                store.loggingService.error('Password change failed', { m: error.message });
-                return false;
+                store.loggingService.info('AuthStore: Password changed successfully');
               },
             });
           }),
         ),
       ),
 
-      // Versão Observable de changePassword para compatibilidade
-      changePassword$(request: ChangePasswordRequest): Observable<any> {
-        return toObservable(this.changePassword(request));
+      // === REGISTRO DE USUÁRIO ===
+
+      signup$: rxMethod<SignupRequestPayload>(
+        pipe(
+          switchMap((userData) => {
+            const operationKey = 'signup';
+
+            return store.trackCall(operationKey, store.authService.registerUserRequest(userData), {
+              onSuccess: (user: User) => {
+                store.loggingService.info('AuthStore: User registration successful', { userId: user.id });
+              },
+            });
+          }),
+        ),
+      ),
+
+      // === VERIFICAÇÕES DE PERMISSÃO ===
+
+      hasRole(moduleId: string, roleName: string, exactMatch: boolean = false): boolean {
+        const user = store.currentUser();
+        if (!user?.roles) return false;
+
+        // Admin global sempre tem acesso
+        const roleHierarchy = store.authConfigService.roleHierarchy();
+        const isGlobalAdmin = user.roles.some((r) => r.moduleId === 'core' && roleHierarchy[r.role] === roleHierarchy['admin']);
+
+        if (isGlobalAdmin) return true;
+
+        if (exactMatch) {
+          return user.roles.some((r) => r.moduleId === moduleId && r.role === roleName);
+        } else {
+          const requiredLevel = roleHierarchy[roleName] || 0;
+          return user.roles
+            .filter((r) => r.moduleId === moduleId)
+            .some((r) => {
+              const roleLevel = roleHierarchy[r.role] || 0;
+              return roleLevel >= requiredLevel;
+            });
+        }
       },
 
-      // Delegação para RoleStore das verificações de permissão
-      hasRole(moduleId: string, roleName: string) {
-        return store.roleStore.hasRole(moduleId, roleName);
-      },
+      hasRoleSync: (moduleId: string, roleName: string, exactMatch: boolean = false) => methods.hasRole(moduleId, roleName, exactMatch),
 
-      // Versão síncrona
-      hasRoleSync(moduleId: string, roleName: string): boolean {
-        const user = store.user();
-        return store.roleStore.hasRoleSync(user, moduleId, roleName);
-      },
-
-      // Verificação de permissões - DELEGADO PARA ROLESTORE
-      checkUserHasPermissionForAction(moduleIdToCheck: string, permissionInput: string, actionToCheck: string): boolean {
-        // Obter o usuário atual
-        const user = store.user();
+      hasPermission(moduleId: string, permissionCode: string, action: string = 'view'): boolean {
+        const user = store.currentUser();
         if (!user) return false;
 
-        return store.roleStore.checkUserHasPermissionForAction(user, moduleIdToCheck, permissionInput, actionToCheck);
+        return store.permissionService.checkUserHasPermission(user, moduleId, permissionCode, action);
       },
 
-      // Papel mais alto em módulo
-      getHighestRoleInModuleSync(moduleId: string): string | null {
-        return store.roleStore.getHighestRoleInModuleSync(moduleId);
+      hasPermissionSync: (moduleId: string, permissionCode: string, action: string = 'view') =>
+        methods.hasPermission(moduleId, permissionCode, action),
+
+      // === UTILITÁRIOS ===
+
+      clearAuthState(): void {
+        // Limpar tokens e CSRF
+        tokenHelpers.clearAuthState(store.tokenService, store.csrfService);
+
+        // Resetar estado da store
+        patchState(store, {
+          currentUser: null,
+          returnUrl: '',
+          lastLoginTime: null,
+          lastRefreshTime: null,
+          rememberUser: false,
+        });
+
+        // Limpar tentativas de login
+        rateLimitHelpers.resetLoginAttempts('');
+
+        store.loggingService.debug('AuthStore: Auth state cleared');
       },
 
-      // Método auxiliar para redirecionamento após login
-      redirectAfterLogin(): void {
-        const returnUrl = redirectHelpers.getReturnUrl(store.localStorageService, store.authConfigService);
-        store.loggingService.debug('AuthStore: Redirecting after login', { returnUrl });
-        store.router.navigateByUrl(returnUrl);
+      saveReturnUrl(url: string): void {
+        redirectHelpers.saveReturnUrl(url, store.localStorageService);
+      },
+
+      getReturnUrl(): string {
+        return redirectHelpers.getReturnUrl(store.localStorageService, store.authConfigService);
+      },
+
+      clearReturnUrl(): void {
         redirectHelpers.clearReturnUrl(store.localStorageService);
       },
 
-      // Método auxiliar para redirecionamento após logout
-      redirectAfterLogout(): void {
-        const redirectPath = store.authConfigService.config()?.redirectAfterLogout || '/login';
-        store.loggingService.debug('AuthStore: Redirecting after logout', { redirectPath });
-        store.router.navigateByUrl(redirectPath);
+      redirectAfterLogin(): void {
+        redirectHelpers.redirectAfterLogin(store.router, store.localStorageService, store.authConfigService);
       },
 
-      // Método para converter um Signal para Observable quando necessário
-      signalToObservable<T>(signal: Signal<T>): Observable<T> {
-        return toObservable(signal);
+      // === GETTERS SÍNCRONOS ===
+
+      getCurrentUser(): User | null {
+        return store.currentUser();
+      },
+
+      getCurrentUserId(): string | null {
+        return store.currentUserId();
+      },
+
+      getIsAuthenticated(): boolean {
+        return store.isAuthenticated();
+      },
+
+      getIsInitialized(): boolean {
+        return store.isInitialized();
+      },
+
+      // === UTILITÁRIOS DE RATE LIMITING ===
+
+      getLoginAttemptCount(username: string): number {
+        return rateLimitHelpers.getLoginAttemptCount(username);
+      },
+
+      getRemainingBlockTime(username: string): number {
+        return rateLimitHelpers.getRemainingBlockTime(username, store.authConfigService);
+      },
+
+      isUserBlocked(username: string): boolean {
+        return rateLimitHelpers.isLoginRateLimited(username, store.authConfigService);
+      },
+
+      // === MÉTODOS DE CONTROLE DE SESSÃO ===
+
+      extendSession(): void {
+        if (store.isAuthenticated()) {
+          methods.refreshToken$();
+        }
+      },
+
+      checkSessionValidity(): boolean {
+        const token = store.tokenService.token();
+        if (!token) return false;
+
+        const isValid = store.tokenService.isAuthenticated();
+        const isExpiringSoon = store.tokenService.isTokenExpiringSoon();
+
+        if (!isValid) {
+          methods.clearAuthState();
+          return false;
+        }
+
+        if (isExpiringSoon) {
+          methods.refreshToken$();
+        }
+
+        return true;
       },
     };
+
     return methods;
   }),
 );

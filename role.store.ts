@@ -79,12 +79,12 @@ export const RoleStore = signalStore(
         store.loggingService.debug('RoleStore: Reset to initial state');
       },
 
-      loadModules() {
+      loadModules$() {
         const operationKey = 'loadModules';
 
         store.loggingService.debug('RoleStore: Loading modules');
 
-        return store.trackCall(operationKey, store.dataService.getModules(), {
+        store.trackCall(operationKey, store.dataService.getModules(), {
           onSuccess: (modules: any) => {
             patchState(store, { modules });
             store.loggingService.debug(`RoleStore: Loaded ${modules.length} modules`);
@@ -94,12 +94,12 @@ export const RoleStore = signalStore(
         });
       },
 
-      loadRolesByModule(moduleId: string) {
+      loadRolesByModule$(moduleId: string) {
         const operationKey = `loadRolesByModule_${moduleId}`;
 
         store.loggingService.debug(`RoleStore: Loading roles for module ${moduleId}`);
 
-        return store.trackCall(operationKey, store.dataService.getRolesByModule(moduleId), {
+        store.trackCall(operationKey, store.dataService.getRolesByModule(moduleId), {
           onSuccess: (rolesData: any) => {
             const currentRoles = store.roles().filter((role) => role.moduleId !== moduleId);
             patchState(store, { roles: [...currentRoles, ...rolesData] });
@@ -111,12 +111,12 @@ export const RoleStore = signalStore(
         });
       },
 
-      loadPermissionsByModule(moduleId: string) {
+      loadPermissionsByModule$(moduleId: string) {
         const operationKey = `loadPermissionsByModule_${moduleId}`;
 
         store.loggingService.debug(`RoleStore: Loading permissions for module ${moduleId}`);
 
-        return store.trackCall(operationKey, store.dataService.getPermissionsByModule(moduleId), {
+        store.trackCall(operationKey, store.dataService.getPermissionsByModule(moduleId), {
           onSuccess: (permissionsData: any) => {
             const currentPermissions = store.permissions().filter((p) => p.moduleId !== moduleId);
             patchState(store, { permissions: [...currentPermissions, ...permissionsData] });
@@ -129,12 +129,12 @@ export const RoleStore = signalStore(
         });
       },
 
-      loadPermissionGroupsByModule(moduleId: string) {
+      loadPermissionGroupsByModule$(moduleId: string) {
         const operationKey = `loadPermissionGroupsByModule_${moduleId}`;
 
         store.loggingService.debug(`RoleStore: Loading permission groups for module ${moduleId}`);
 
-        return store.trackCall(operationKey, store.dataService.getPermissionGroupsByModule(moduleId), {
+        store.trackCall(operationKey, store.dataService.getPermissionGroupsByModule(moduleId), {
           onSuccess: (groupsData: any) => {
             const currentGroups = store.permissionGroups().filter((g) => g.moduleId !== moduleId);
             patchState(store, { permissionGroups: [...currentGroups, ...groupsData] });
@@ -147,7 +147,7 @@ export const RoleStore = signalStore(
       },
 
       // Atribuir permissões a um papel
-      assignPermissionsToRole(params: { roleId: string; permissionAssignments: RolePermissionAssignment[] }) {
+      assignPermissionsToRole$(params: { roleId: string; permissionAssignments: RolePermissionAssignment[] }) {
         const { roleId, permissionAssignments } = params;
         const operationKey = `assignPermissionsToRole_${roleId}`;
 
@@ -155,7 +155,7 @@ export const RoleStore = signalStore(
           count: permissionAssignments.length,
         });
 
-        return store.trackCall(operationKey, store.dataService.assignPermissionsToRole(roleId, permissionAssignments), {
+        store.trackCall(operationKey, store.dataService.assignPermissionsToRole(roleId, permissionAssignments), {
           onSuccess: (updatedRole: any) => {
             this.upsertEntity(updatedRole);
 

@@ -135,7 +135,7 @@ export const UserStore = signalStore(
       loadUser(userId: string) {
         store.loggingService.debug('UserStore: Loading user', { userId });
 
-        return store.trackCall(`loadUser_${userId}`, store.dataService.getUserById(userId), {
+        store.trackCall(`loadUser_${userId}`, store.dataService.getUserById(userId), {
           onSuccess: (user: User) => {
             // Atualiza o usuário na lista de usuários
             this.upsertEntity(user);

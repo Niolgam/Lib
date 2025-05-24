@@ -1,12 +1,14 @@
 // with-data-service.ts - versão corrigida
 import { SignalStoreFeature, patchState, signalStoreFeature, withMethods } from '@ngrx/signals';
 import { rxMethod } from '@ngrx/signals/rxjs-interop';
-import { Observable, of, pipe, switchMap } from 'rxjs';
+import { debounceTime, distinctUntilChanged, Observable, of, pipe, switchMap } from 'rxjs';
+import { createDualMethods, createParametrizedDualMethods } from '@vai/utils';
 
 export interface DataServiceConfig<T> {
   idKey?: keyof T;
   entitiesKey?: string;
   entityName?: string;
+  serviceKey?: string;
   methods?: {
     getAll?: string;
     getById?: string;
@@ -23,6 +25,7 @@ export function withDataService<T extends object, IdType = string>(config: DataS
     idKey = 'id' as keyof T,
     entitiesKey = 'entities',
     entityName = 'item',
+    serviceKey = 'dataService',
     methods = {
       getAll: 'getAll',
       getById: 'getById',
@@ -37,7 +40,12 @@ export function withDataService<T extends object, IdType = string>(config: DataS
   return signalStoreFeature(
     withMethods((store: any) => {
       // Acesso aos serviços injetados via props
-      const dataService = store.dataService;
+      const dataService = store[serviceKey];
+
+      if (!dataService) {
+        throw new Error(`Service '${serviceKey}' not found in store. Make sure to inject it in withProps().`);
+      }
+
       const logger =
         logging && store.loggingService
           ? store.loggingService
@@ -53,140 +61,103 @@ export function withDataService<T extends object, IdType = string>(config: DataS
 
       return {
         // Carregar todos os itens
-        loadAll: rxMethod<void | { silent?: boolean }>(
-          pipe(
-            switchMap((options) => {
-              // Garantir que options é um objeto
-              const opts = options || {};
-              const operationKey = `loadAll_${entityName}`;
+        ...createDualMethods(store, {
+          operationName: 'loadAll',
+          serviceCall: dataService[methods.getAll](),
+          onSuccess: (items: T[]) => {
+            if (store[entitiesKey]) {
+              patchState(store, { [entitiesKey]: items });
+              logger.debug(`DataService: Loaded ${items.length} ${entityName}s`);
+            }
+          },
+          logMessage: `Loading all ${entityName}s`,
+        }),
 
-              if (!opts.silent) {
-                logger.debug(`DataService: Loading all ${entityName}s`);
-              }
-
-              if (!dataService[methods.getAll]) {
-                logger.warn(`DataService: Method ${methods.getAll} not found in service`);
-                return of([]);
-              }
-
-              return trackCall(operationKey, dataService[methods.getAll](), {
-                onSuccess: (items: T[]) => {
-                  if (store[entitiesKey]) {
-                    patchState(store, { [entitiesKey]: items });
-
-                    if (!opts.silent) {
-                      logger.debug(`DataService: Loaded ${items.length} ${entityName}s`);
-                    }
-                  }
-                },
-              });
-            }),
-          ),
+        // Gera: loadById(id) e loadById$(id)
+        ...createParametrizedDualMethods<T, IdType>(
+          store,
+          'loadById',
+          (id: IdType) => {
+            if (!dataService[methods.getById]) {
+              logger.warn(`DataService: Method ${methods.getById} not found in service`);
+              throw new Error(`Method ${methods.getById} not found`);
+            }
+            return dataService[methods.getById](id);
+          },
+          (item: T, id: IdType) => {
+            if (item && store[entitiesKey]) {
+              store.upsertEntity(item);
+              logger.debug(`DataService: Loaded ${entityName} with id: ${id}`);
+            }
+          },
+          (id: IdType) => `Loading ${entityName} by id: ${id}`,
         ),
 
-        // Carregar um item por ID
-        loadById: rxMethod<IdType>(
-          pipe(
-            switchMap((id) => {
-              const operationKey = `loadById_${entityName}_${id}`;
-
-              logger.debug(`DataService: Loading ${entityName} by id: ${id}`);
-
-              if (!dataService[methods.getById]) {
-                logger.warn(`DataService: Method ${methods.getById} not found in service`);
-                return of(null);
-              }
-
-              return trackCall(operationKey, dataService[methods.getById](id), {
-                onSuccess: (item: T) => {
-                  if (item && store[entitiesKey]) {
-                    store.upsertEntity(item);
-                    logger.debug(`DataService: Loaded ${entityName} with id: ${id}`);
-                  }
-                },
-              });
-            }),
-          ),
+        // Gera: create(data) e create$(data)
+        ...createParametrizedDualMethods<T, Partial<T>>(
+          store,
+          'create',
+          (data: Partial<T>) => {
+            if (!dataService[methods.create]) {
+              logger.warn(`DataService: Method ${methods.create} not found in service`);
+              throw new Error(`Method ${methods.create} not found`);
+            }
+            return dataService[methods.create](data);
+          },
+          (newItem: T, data: Partial<T>) => {
+            if (newItem && store[entitiesKey]) {
+              store.addEntity(newItem);
+              logger.debug(`DataService: Created ${entityName} with id: ${String(newItem[idKey])}`);
+            }
+          },
+          () => `Creating new ${entityName}`,
         ),
 
-        // Criar um novo item
-        create: rxMethod<Partial<T>>(
-          pipe(
-            switchMap((data) => {
-              const operationKey = `create_${entityName}`;
-
-              logger.debug(`DataService: Creating new ${entityName}`, data);
-
-              if (!dataService[methods.create]) {
-                logger.warn(`DataService: Method ${methods.create} not found in service`);
-                return of(null);
-              }
-
-              return trackCall(operationKey, dataService[methods.create](data), {
-                onSuccess: (newItem: T) => {
-                  if (newItem && store[entitiesKey]) {
-                    store.addEntity(newItem);
-                    logger.debug(`DataService: Created ${entityName} with id: ${String(newItem[idKey])}`);
-                  }
-                },
-              });
-            }),
-          ),
+        // Gera: update(id, data) e update$(id, data)
+        ...createParametrizedDualMethods<T, { id: IdType; data: Partial<T> }>(
+          store,
+          'update',
+          ({ id, data }) => {
+            if (!dataService[methods.update]) {
+              logger.warn(`DataService: Method ${methods.update} not found in service`);
+              throw new Error(`Method ${methods.update} not found`);
+            }
+            return dataService[methods.update](id, data);
+          },
+          (updatedItem: T, { id }) => {
+            if (updatedItem && store[entitiesKey]) {
+              store.updateEntity(id, updatedItem);
+              logger.debug(`DataService: Updated ${entityName} with id: ${id}`);
+            }
+          },
+          ({ id }) => `Updating ${entityName} with id: ${id}`,
         ),
 
-        // Atualizar um item existente
-        update: rxMethod<{ id: IdType; data: Partial<T> }>(
-          pipe(
-            switchMap(({ id, data }) => {
-              const operationKey = `update_${entityName}_${id}`;
-
-              logger.debug(`DataService: Updating ${entityName} with id: ${id}`, data);
-
-              if (!dataService[methods.update]) {
-                logger.warn(`DataService: Method ${methods.update} not found in service`);
-                return of(null);
-              }
-
-              return trackCall(operationKey, dataService[methods.update](id, data), {
-                onSuccess: (updatedItem: T) => {
-                  if (updatedItem && store[entitiesKey]) {
-                    store.updateEntity(id, updatedItem);
-                    logger.debug(`DataService: Updated ${entityName} with id: ${id}`);
-                  }
-                },
-              });
-            }),
-          ),
+        // Gera: delete(id) e delete$(id)
+        ...createParametrizedDualMethods<void, IdType>(
+          store,
+          'delete',
+          (id: IdType) => {
+            if (!dataService[methods.delete]) {
+              logger.warn(`DataService: Method ${methods.delete} not found in service`);
+              throw new Error(`Method ${methods.delete} not found`);
+            }
+            return dataService[methods.delete](id);
+          },
+          (_, id: IdType) => {
+            if (store[entitiesKey]) {
+              store.removeEntity(id);
+              logger.debug(`DataService: Deleted ${entityName} with id: ${id}`);
+            }
+          },
+          (id: IdType) => `Deleting ${entityName} with id: ${id}`,
         ),
 
-        // Excluir um item
-        delete: rxMethod<IdType>(
-          pipe(
-            switchMap((id) => {
-              const operationKey = `delete_${entityName}_${id}`;
-
-              logger.debug(`DataService: Deleting ${entityName} with id: ${id}`);
-
-              if (!dataService[methods.delete]) {
-                logger.warn(`DataService: Method ${methods.delete} not found in service`);
-                return of(null);
-              }
-
-              return trackCall(operationKey, dataService[methods.delete](id), {
-                onSuccess: () => {
-                  if (store[entitiesKey]) {
-                    store.removeEntity(id);
-                    logger.debug(`DataService: Deleted ${entityName} with id: ${id}`);
-                  }
-                },
-              });
-            }),
-          ),
-        ),
-
-        // Pesquisar itens
+        // 🔍 rxMethod: Para search com debounce + cancelamento
         search: rxMethod<any>(
           pipe(
+            debounceTime(300),
+            distinctUntilChanged((prev, curr) => JSON.stringify(prev) === JSON.stringify(curr)),
             switchMap((params) => {
               const operationKey = `search_${entityName}`;
 
